@@ -1,4 +1,5 @@
 import Foundation
+import Generation
 import llama
 import CoreML
 
@@ -14,6 +15,9 @@ open class LLM: ObservableObject {
     // model used for non-coreML models
     public var model: Model?
     public var coreMLModel: MLModel?
+    // this is calculated/generated if you are using CoreML
+    private var coreMLConfig: MLModelConfiguration?
+    private var generationConfig: GenerationConfig?
     public var history: [Chat]
     public var preprocess: (_ input: String, _ history: [Chat]) -> String = { input, _ in return input }
     public var postprocess: (_ output: String) -> Void                    = { print($0) }
@@ -78,10 +82,7 @@ open class LLM: ObservableObject {
 #endif
         var coreMLModel: MLModel?
         var model: Model?
-        if (coreMLConfig != nil){
-            coreMLModel = try! MLModel(contentsOf: URL(fileURLWithPath: path), configuration: coreMLConfig!)
-            self.model = nil
-        }else{
+        if (coreMLConfig == nil){
             model = llama_load_model_from_file(self.path, modelParams)!
             self.coreMLModel = nil
         }
@@ -125,6 +126,15 @@ open class LLM: ObservableObject {
         self.stopSequence = stopSequence?.utf8CString
         self.stopSequenceLength = (self.stopSequence?.count ?? 1) - 1
         batch = llama_batch_init(Int32(self.maxTokenCount), 0, 1)
+        
+        // coreML setup way down here to get use of all self initialized parameters
+        if (coreMLConfig != nil){
+            coreMLModel = try! MLModel(contentsOf: URL(fileURLWithPath: path), configuration: coreMLConfig!)
+            self.model = nil
+            
+            // setup generation config for use with swift-transformers
+            self.generationConfig = llmConfigToGenerationConfig()
+        }
     }
     
     deinit {
@@ -215,6 +225,23 @@ open class LLM: ObservableObject {
         )
         self.preprocess = template.preprocess
         self.template = template
+    }
+    
+    private func llmConfigToGenerationConfig() -> GenerationConfig{
+        var config = GenerationConfig(maxNewTokens: self.maxTokenCount)
+        
+        // this will be set to 1, this way it generates 1 token at a time?
+        config.maxLength = 1
+        // note: some values are not converted
+        config.temperature = Double(self.temp)
+        config.topK = Int(self.topK)
+        config.topP = Double(self.topP)
+        
+        // we don't set these now, do we need to?
+        // config.padTokenId = 0
+        // config.bosTokenId = Token { llama_token_bos(self) }
+        // config.eosTokenId = Token { llama_token_eos(self) }
+        return config
     }
     
     private var shouldContinuePredicting = false
@@ -341,8 +368,15 @@ open class LLM: ObservableObject {
             guard prepare(from: input, to: output) else { return output.finish() }
             var response: [String] = []
             while currentCount < maxTokenCount {
-                let token = await predictNextToken()
-                if !process(token, to: output) { return output.finish() }
+                var token: Token?
+                if (self.coreMLModel != nil){
+                    // this is where we would run into annoying issues
+                    // and may make use of swift-transformers to make it easier on us?
+                    token = 0
+                }else{
+                    token = await predictNextToken()
+                }
+                if !process(token!, to: output) { return output.finish() }
                 currentCount += 1
             }
             await finishResponse(from: &response, to: output)
