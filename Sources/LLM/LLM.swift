@@ -88,7 +88,13 @@ open class LLM: ObservableObject {
         
         params = llama_context_default_params()
         let processorCount = UInt32(ProcessInfo().processorCount)
-        self.maxTokenCount = Int(min(maxTokenCount, llama_n_ctx_train(model)))
+        if (coreMLConfig != nil){
+            // won't modify this for CoreML
+            self.maxTokenCount = Int(maxTokenCount)
+        }else{
+            self.maxTokenCount = Int(min(maxTokenCount, llama_n_ctx_train(model)))
+        }
+        
         params.seed = seed
         params.n_ctx = UInt32(self.maxTokenCount)
         params.n_batch = params.n_ctx
