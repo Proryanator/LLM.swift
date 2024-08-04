@@ -1,4 +1,6 @@
 import Foundation
+import Models
+import Tokenizers
 import Generation
 import llama
 import CoreML
@@ -14,8 +16,8 @@ public typealias Chat = (role: Role, content: String)
 open class LLM: ObservableObject {
     // model used for non-coreML models
     public var model: Model?
-    public var coreMLModel: MLModel?
     // this is calculated/generated if you are using CoreML
+    private var languageModel: LanguageModel?
     private var coreMLConfig: MLModelConfiguration?
     private var generationConfig: GenerationConfig?
     public var history: [Chat]
@@ -80,11 +82,10 @@ open class LLM: ObservableObject {
 #if targetEnvironment(simulator)
         modelParams.n_gpu_layers = 0
 #endif
-        var coreMLModel: MLModel?
         var model: Model?
         if (coreMLConfig == nil){
             model = llama_load_model_from_file(self.path, modelParams)!
-            self.coreMLModel = nil
+            self.languageModel = nil
         }
         
         params = llama_context_default_params()
@@ -106,11 +107,10 @@ open class LLM: ObservableObject {
         self.temp = temp
         self.historyLimit = historyLimit
         
-        if (coreMLConfig != nil){
-            self.coreMLModel = coreMLModel!
-        }else{
+        if (coreMLConfig == nil){
             self.model = model!
         }
+        
         self.history = history
         // would need to handle the newline token portion here, can we pull that from somewhere?
         // will hard-code for llama models for now
@@ -129,7 +129,7 @@ open class LLM: ObservableObject {
         
         // coreML setup way down here to get use of all self initialized parameters
         if (coreMLConfig != nil){
-            coreMLModel = try! MLModel(contentsOf: URL(fileURLWithPath: path), configuration: coreMLConfig!)
+            self.languageModel = try! LanguageModel.loadCompiled(url: URL(fileURLWithPath: path), computeUnits: .cpuAndGPU)
             self.model = nil
             
             // setup generation config for use with swift-transformers
@@ -369,10 +369,12 @@ open class LLM: ObservableObject {
             var response: [String] = []
             while currentCount < maxTokenCount {
                 var token: Token?
-                if (self.coreMLModel != nil){
-                    // this is where we would run into annoying issues
-                    // and may make use of swift-transformers to make it easier on us?
+                if (self.languageModel != nil){
+                    // use swift-transformers to get the next token
+                    let encoded = encode(input).map({Int($0)})
+                    // TODO: implement a way to just get the next token using swift-transformers (if we can)
                     token = 0
+                    // token = Int32(languageModel.greedySearch(config: generationConfig, tokens: encoded)[0])
                 }else{
                     token = await predictNextToken()
                 }
