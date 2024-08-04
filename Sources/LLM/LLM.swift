@@ -1,5 +1,6 @@
 import Foundation
 import llama
+import CoreML
 
 public typealias Token = llama_token
 public typealias Model = OpaquePointer
@@ -10,7 +11,9 @@ public typealias Chat = (role: Role, content: String)
 }
 
 open class LLM: ObservableObject {
-    public var model: Model
+    // model used for non-coreML models
+    public var model: Model?
+    public var coreMLModel: MLModel?
     public var history: [Chat]
     public var preprocess: (_ input: String, _ history: [Chat]) -> String = { input, _ in return input }
     public var postprocess: (_ output: String) -> Void                    = { print($0) }
@@ -58,6 +61,7 @@ open class LLM: ObservableObject {
     
     public init(
         from path: String,
+        isCoreML: Bool = false,
         stopSequence: String? = nil,
         history: [Chat] = [],
         seed: UInt32 = .random(in: .min ... .max),
@@ -72,7 +76,16 @@ open class LLM: ObservableObject {
 #if targetEnvironment(simulator)
         modelParams.n_gpu_layers = 0
 #endif
-        let model = llama_load_model_from_file(self.path, modelParams)!
+        var coreMLModel: MLModel?
+        var model: Model?
+        if (isCoreML){
+            coreMLModel = try! MLModel(contentsOf: URL(string: path)!)
+            self.model = nil
+        }else{
+            model = llama_load_model_from_file(self.path, modelParams)!
+            self.coreMLModel = nil
+        }
+        
         params = llama_context_default_params()
         let processorCount = UInt32(ProcessInfo().processorCount)
         self.maxTokenCount = Int(min(maxTokenCount, llama_n_ctx_train(model)))
@@ -85,10 +98,24 @@ open class LLM: ObservableObject {
         self.topP = topP
         self.temp = temp
         self.historyLimit = historyLimit
-        self.model = model
+        
+        if (isCoreML){
+            self.coreMLModel = coreMLModel!
+        }else{
+            self.model = model!
+        }
         self.history = history
-        self.totalTokenCount = Int(llama_n_vocab(model))
-        self.newlineToken = model.newLineToken
+        // would need to handle the newline token portion here, can we pull that from somewhere?
+        // will hard-code for llama models for now
+        if (isCoreML){
+            // we'll need to handle these for other model types, can we hard-code these for now?
+            self.newlineToken = 32000
+            self.totalTokenCount = 13
+        }else{
+            self.newlineToken = model!.newLineToken
+            self.totalTokenCount = Int(llama_n_vocab(model!))
+        }
+        
         self.stopSequence = stopSequence?.utf8CString
         self.stopSequenceLength = (self.stopSequence?.count ?? 1) - 1
         batch = llama_batch_init(Int32(self.maxTokenCount), 0, 1)
@@ -185,7 +212,7 @@ open class LLM: ObservableObject {
     
     @InferenceActor
     private func predictNextToken() async -> Token {
-        guard shouldContinuePredicting else { return model.endToken }
+        guard shouldContinuePredicting else { return model!.endToken }
         let logits = llama_get_logits_ith(context.pointer, batch.n_tokens - 1)!
         var candidates = (0..<totalTokenCount).map { token in
             llama_token_data(id: Int32(token), logit: logits[token], p: 0.0)
@@ -217,7 +244,7 @@ open class LLM: ObservableObject {
     
     private func prepare(from input: borrowing String, to output: borrowing AsyncStream<String>.Continuation) -> Bool {
         guard !input.isEmpty else { return false }
-        context = .init(model, params)
+        context = .init(model!, params)
         var tokens = encode(input)
         var initialCount = tokens.count
         currentCount = Int32(initialCount)
@@ -266,7 +293,7 @@ open class LLM: ObservableObject {
             static var stopSequenceEndIndex = 0
             static var letters: [CChar] = []
         }
-        guard token != model.endToken else { return false }
+        guard token != model!.endToken else { return false }
         var word = decode(token)
         guard let stopSequence else { output.yield(word); return true }
         var found = 0 < saved.stopSequenceEndIndex
@@ -360,16 +387,16 @@ open class LLM: ObservableObject {
 
     private var multibyteCharacter: [CUnsignedChar] = []
     private func decode(_ token: Token) -> String {
-        return model.decode(token, with: &multibyteCharacter)
+        return model!.decode(token, with: &multibyteCharacter)
     }
     
     public func decode(_ tokens: [Token]) -> String {
-        return tokens.map({model.decodeOnly($0)}).joined()
+        return tokens.map({model!.decodeOnly($0)}).joined()
     }
     
     @inlinable
     public func encode(_ text: borrowing String) -> [Token] {
-        model.encode(text)
+        model!.encode(text)
     }
 }
 
