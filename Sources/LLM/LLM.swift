@@ -61,7 +61,7 @@ open class LLM: ObservableObject {
     
     public init(
         from path: String,
-        isCoreML: Bool = false,
+        coreMLConfig: MLModelConfiguration? = nil,
         stopSequence: String? = nil,
         history: [Chat] = [],
         seed: UInt32 = .random(in: .min ... .max),
@@ -78,8 +78,8 @@ open class LLM: ObservableObject {
 #endif
         var coreMLModel: MLModel?
         var model: Model?
-        if (isCoreML){
-            coreMLModel = try! MLModel(contentsOf: URL(string: path)!)
+        if (coreMLConfig != nil){
+            coreMLModel = try! MLModel(contentsOf: URL(fileURLWithPath: path), configuration: coreMLConfig!)
             self.model = nil
         }else{
             model = llama_load_model_from_file(self.path, modelParams)!
@@ -99,7 +99,7 @@ open class LLM: ObservableObject {
         self.temp = temp
         self.historyLimit = historyLimit
         
-        if (isCoreML){
+        if (coreMLConfig != nil){
             self.coreMLModel = coreMLModel!
         }else{
             self.model = model!
@@ -107,7 +107,7 @@ open class LLM: ObservableObject {
         self.history = history
         // would need to handle the newline token portion here, can we pull that from somewhere?
         // will hard-code for llama models for now
-        if (isCoreML){
+        if (coreMLConfig != nil){
             // we'll need to handle these for other model types, can we hard-code these for now?
             self.newlineToken = 32000
             self.totalTokenCount = 13
@@ -128,6 +128,7 @@ open class LLM: ObservableObject {
     public convenience init(
         from url: URL,
         stopSequence: String? = nil,
+        coreMLConfig: MLModelConfiguration? = nil,
         history: [Chat] = [],
         seed: UInt32 = .random(in: .min ... .max),
         topK: Int32 = 40,
@@ -138,6 +139,7 @@ open class LLM: ObservableObject {
     ) {
         self.init(
             from: url.path,
+            coreMLConfig: coreMLConfig,
             stopSequence: stopSequence,
             history: history,
             seed: seed,
@@ -151,6 +153,7 @@ open class LLM: ObservableObject {
     
     public convenience init(
         from huggingFaceModel: HuggingFaceModel,
+        coreMLConfig: MLModelConfiguration? = nil,
         to url: URL = .documentsDirectory,
         as name: String? = nil,
         history: [Chat] = [],
@@ -167,6 +170,7 @@ open class LLM: ObservableObject {
         }
         self.init(
             from: url,
+            coreMLConfig: coreMLConfig,
             template: huggingFaceModel.template,
             history: history,
             seed: seed,
@@ -181,6 +185,7 @@ open class LLM: ObservableObject {
     
     public convenience init(
         from url: URL,
+        coreMLConfig: MLModelConfiguration? = nil,
         template: Template,
         history: [Chat] = [],
         seed: UInt32 = .random(in: .min ... .max),
@@ -192,6 +197,7 @@ open class LLM: ObservableObject {
     ) {
         self.init(
             from: url.path,
+            coreMLConfig: coreMLConfig,
             stopSequence: template.stopSequence,
             history: history,
             seed: seed,
