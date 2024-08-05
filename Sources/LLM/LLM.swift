@@ -134,7 +134,6 @@ open class LLM: ObservableObject {
             
             // setup generation config for use with swift-transformers
             self.generationConfig = languageModel!.defaultGenerationConfig
-            self.generationConfig!.maxNewTokens = 20
             
             // setting max new tokens breaks this for some reason
             // maybe we'll want to re-add this later on
