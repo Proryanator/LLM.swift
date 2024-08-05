@@ -143,6 +143,11 @@ open class LLM: ObservableObject {
         
         // save the config
         self.coreMLConfig = coreMLConfig
+        
+        // load the model the first time if it is not loaded
+        if (coreMLConfig == nil && context == nil){
+            context = .init(model!, params)
+        }
     }
     
     deinit {
@@ -296,10 +301,6 @@ open class LLM: ObservableObject {
     
     private func prepare(from input: borrowing String, to output: borrowing AsyncStream<String>.Continuation) -> Bool {
         guard !input.isEmpty else { return false }
-        // load the model the first time if it is not loaded
-        if (context == nil){
-            context = .init(model!, params)
-        }
         var tokens = encode(input)
         var initialCount = tokens.count
         currentCount = Int32(initialCount)
