@@ -235,6 +235,11 @@ open class LLM: ObservableObject {
         self.template = template
     }
     
+    // currently only works for non-CoreML models
+    public func clearModelFromMemory() {
+        context = nil
+    }
+    
     private func llmConfigToGenerationConfig() -> GenerationConfig{
         var config = GenerationConfig(maxNewTokens: self.maxTokenCount)
         
@@ -291,7 +296,10 @@ open class LLM: ObservableObject {
     
     private func prepare(from input: borrowing String, to output: borrowing AsyncStream<String>.Continuation) -> Bool {
         guard !input.isEmpty else { return false }
-        context = .init(model!, params)
+        // load the model the first time if it is not loaded
+        if (context == nil){
+            context = .init(model!, params)
+        }
         var tokens = encode(input)
         var initialCount = tokens.count
         currentCount = Int32(initialCount)
@@ -372,7 +380,9 @@ open class LLM: ObservableObject {
     
     private func getResponse(from input: String) -> AsyncStream<String> {
         .init { output in Task {
-            defer { context = nil }
+            // this used to force the model to be cleared after a response
+            // we want to keep the model in memory, and only release it when we want to
+            // defer { context = nil }
             guard prepare(from: input, to: output) else { return output.finish() }
             var response: [String] = []
             while currentCount < maxTokenCount {
