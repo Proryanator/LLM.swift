@@ -135,6 +135,9 @@ open class LLM: ObservableObject {
             // setup generation config for use with swift-transformers
             self.generationConfig = llmConfigToGenerationConfig()
         }
+        
+        // save the config
+        self.coreMLConfig = coreMLConfig
     }
     
     deinit {
@@ -368,17 +371,8 @@ open class LLM: ObservableObject {
             guard prepare(from: input, to: output) else { return output.finish() }
             var response: [String] = []
             while currentCount < maxTokenCount {
-                var token: Token?
-                if (self.languageModel != nil){
-                    // use swift-transformers to get the next token
-                    let encoded = encode(input).map({Int($0)})
-                    // TODO: implement a way to just get the next token using swift-transformers (if we can)
-                    token = 0
-                    // token = Int32(languageModel.greedySearch(config: generationConfig, tokens: encoded)[0])
-                }else{
-                    token = await predictNextToken()
-                }
-                if !process(token!, to: output) { return output.finish() }
+                let token = await predictNextToken()
+                if !process(token, to: output) { return output.finish() }
                 currentCount += 1
             }
             await finishResponse(from: &response, to: output)
@@ -408,14 +402,21 @@ open class LLM: ObservableObject {
         isAvailable = false
         self.input = input
         let processedInput = preprocess(input, history)
-        let response = getResponse(from: processedInput)
-        let output = await makeOutputFrom(response)
-        history += [(.user, input), (.bot, output)]
+        var output: String?
+        if (self.coreMLConfig == nil){
+            let response = getResponse(from: processedInput)
+            output = await makeOutputFrom(response)
+        }else{
+            // this would need to tokenize correctly as well
+            output = try! await languageModel!.generate(config: self.generationConfig!, prompt: processedInput)
+        }
+        
+        history += [(.user, input), (.bot, output!)]
         let historyCount = history.count
         if historyLimit < historyCount {
             history.removeFirst(min(2, historyCount))
         }
-        postprocess(output)
+        postprocess(output!)
         isAvailable = true
     }
     
