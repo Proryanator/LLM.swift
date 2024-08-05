@@ -243,6 +243,7 @@ open class LLM: ObservableObject {
     // currently only works for non-CoreML models
     public func clearModelFromMemory() {
         context = nil
+        languageModel = nil
     }
     
     private func llmConfigToGenerationConfig() -> GenerationConfig{
