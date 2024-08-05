@@ -134,6 +134,9 @@ open class LLM: ObservableObject {
             
             // setup generation config for use with swift-transformers
             self.generationConfig = languageModel!.defaultGenerationConfig
+            self.generationConfig!.maxNewTokens = 20
+            
+            // setting max new tokens breaks this for some reason
             // maybe we'll want to re-add this later on
             // self.generationConfig = llmConfigToGenerationConfig()
         }
@@ -409,8 +412,9 @@ open class LLM: ObservableObject {
             let response = getResponse(from: processedInput)
             output = await makeOutputFrom(response)
         }else{
-            // is there something wrong with the input here?
-            output = try! await languageModel!.generate(config: self.generationConfig!, prompt: input)
+            output = try! await languageModel!.generate(config: self.generationConfig!, prompt: processedInput)
+            // without this, the output is never set/to be used later on
+            self.output = output!.trimmingCharacters(in: .whitespacesAndNewlines)
         }
         
         history += [(.user, input), (.bot, output!)]
