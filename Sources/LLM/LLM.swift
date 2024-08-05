@@ -133,7 +133,9 @@ open class LLM: ObservableObject {
             self.model = nil
             
             // setup generation config for use with swift-transformers
-            self.generationConfig = llmConfigToGenerationConfig()
+            self.generationConfig = languageModel!.defaultGenerationConfig
+            // maybe we'll want to re-add this later on
+            // self.generationConfig = llmConfigToGenerationConfig()
         }
         
         // save the config
@@ -407,8 +409,8 @@ open class LLM: ObservableObject {
             let response = getResponse(from: processedInput)
             output = await makeOutputFrom(response)
         }else{
-            // this would need to tokenize correctly as well
-            output = try! await languageModel!.generate(config: self.generationConfig!, prompt: processedInput)
+            // is there something wrong with the input here?
+            output = try! await languageModel!.generate(config: self.generationConfig!, prompt: input)
         }
         
         history += [(.user, input), (.bot, output!)]
