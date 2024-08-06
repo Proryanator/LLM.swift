@@ -134,7 +134,7 @@ open class LLM: ObservableObject {
             
             // setup generation config for use with swift-transformers
             // same one we were using before
-            let config = GenerationConfig(maxNewTokens: 200, repetitionPenalty: -1.0)
+            let config = GenerationConfig(maxLength: 1024, maxNewTokens: 1024, topK: 50, topP: 0.9, repetitionPenalty: 1.1)
             if let config = languageModel?.defaultGenerationConfig { self.generationConfig = config }
         }
         
@@ -421,22 +421,13 @@ open class LLM: ObservableObject {
             let response = getResponse(from: processedInput)
             output = await makeOutputFrom(response)
         }else{
-            // this is not generating anything oddly enough, tiny llama limitation?
             output = try! await languageModel!.generate(config: self.generationConfig!, prompt: processedInput){currentGeneration in
-                // remove everything before AI repsonse, and everything after
-                // still has newline and some junk text after
-                let firstSplit = "assistant\n"
-                let lastSplit = "<|im_end"
-                
-                var sanitizedResponse = currentGeneration.components(separatedBy: firstSplit).last?.components(separatedBy: lastSplit).first!
-                
-                // text may contain x number of '<' in this model for some reason
-                // sanitizedResponse?.replace(/<.*/, with: "")
-                print("LLM progress: \(sanitizedResponse!)")
+                // TODO: would output progressively as we go
             }
             
+            
             // without this, the output is never set/to be used later on
-            self.output = output!.trimmingCharacters(in: .whitespacesAndNewlines)
+            self.output = tinyLlamaSanitize(input: output!).trimmingCharacters(in: .whitespacesAndNewlines)
         }
         
         history += [(.user, input), (.bot, output!)]
@@ -446,6 +437,17 @@ open class LLM: ObservableObject {
         }
         postprocess(output!)
         isAvailable = true
+    }
+    
+    private func tinyLlamaSanitize(input: String) -> String {
+        // remove everything before AI repsonse, and everything after
+        // still has newline and some junk text after
+        let firstSplit = "assistant\n"
+        let lastSplit = "<|im_end"
+        
+        var sanitizedResponse = input.components(separatedBy: firstSplit).last?.components(separatedBy: lastSplit).first!
+        
+        return sanitizedResponse!
     }
     
     open func respond(to input: String) async {
