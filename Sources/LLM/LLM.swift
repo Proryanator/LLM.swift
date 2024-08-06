@@ -133,11 +133,9 @@ open class LLM: ObservableObject {
             self.model = nil
             
             // setup generation config for use with swift-transformers
-            self.generationConfig = languageModel!.defaultGenerationConfig
-            
-            // setting max new tokens breaks this for some reason
-            // maybe we'll want to re-add this later on
-            // self.generationConfig = llmConfigToGenerationConfig()
+            // same one we were using before
+            let config = GenerationConfig(maxNewTokens: 200, repetitionPenalty: -1.0)
+            if let config = languageModel?.defaultGenerationConfig { self.generationConfig = config }
         }
         
         // save the config
@@ -423,7 +421,20 @@ open class LLM: ObservableObject {
             let response = getResponse(from: processedInput)
             output = await makeOutputFrom(response)
         }else{
-            output = try! await languageModel!.generate(config: self.generationConfig!, prompt: processedInput)
+            // this is not generating anything oddly enough, tiny llama limitation?
+            output = try! await languageModel!.generate(config: self.generationConfig!, prompt: processedInput){currentGeneration in
+                // remove everything before AI repsonse, and everything after
+                // still has newline and some junk text after
+                let firstSplit = "assistant\n"
+                let lastSplit = "<|im_end"
+                
+                var sanitizedResponse = currentGeneration.components(separatedBy: firstSplit).last?.components(separatedBy: lastSplit).first!
+                
+                // text may contain x number of '<' in this model for some reason
+                // sanitizedResponse?.replace(/<.*/, with: "")
+                print("LLM progress: \(sanitizedResponse!)")
+            }
+            
             // without this, the output is never set/to be used later on
             self.output = output!.trimmingCharacters(in: .whitespacesAndNewlines)
         }
