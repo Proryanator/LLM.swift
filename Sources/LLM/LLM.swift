@@ -17,7 +17,7 @@ open class LLM: ObservableObject {
     // model used for non-coreML models
     public var model: Model?
     // this is calculated/generated if you are using CoreML
-    private var languageModel: LanguageModel?
+    public var languageModel: LanguageModel?
     private var coreMLConfig: MLModelConfiguration?
     private var generationConfig: GenerationConfig?
     public var history: [Chat]
@@ -422,7 +422,7 @@ open class LLM: ObservableObject {
             output = await makeOutputFrom(response)
         }else{
             output = try! await languageModel!.generate(config: self.generationConfig!, prompt: processedInput){currentGeneration in
-                // TODO: would output progressively as we go
+                self.update(self.tinyLlamaSanitize(input: currentGeneration))
             }
             
             
