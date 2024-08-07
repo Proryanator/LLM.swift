@@ -1,0 +1,7 @@
+xcshareddata/
+pedro.xcuserdatad/
+.DS_Store
+xcuserdata
+.swiftpm
+Package.resolved
+.idea/

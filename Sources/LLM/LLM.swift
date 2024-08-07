@@ -1,5 +1,9 @@
 import Foundation
+import Models
+import Tokenizers
+import Generation
 import llama
+import CoreML
 
 public typealias Token = llama_token
 public typealias Model = OpaquePointer
@@ -10,7 +14,12 @@ public typealias Chat = (role: Role, content: String)
 }
 
 open class LLM: ObservableObject {
-    public var model: Model
+    // model used for non-coreML models
+    public var model: Model?
+    // this is calculated/generated if you are using CoreML
+    public var languageModel: LanguageModel?
+    private var coreMLConfig: MLModelConfiguration?
+    private var generationConfig: GenerationConfig?
     public var history: [Chat]
     public var preprocess: (_ input: String, _ history: [Chat]) -> String = { input, _ in return input }
     public var postprocess: (_ output: String) -> Void                    = { print($0) }
@@ -58,6 +67,7 @@ open class LLM: ObservableObject {
     
     public init(
         from path: String,
+        coreMLConfig: MLModelConfiguration? = nil,
         stopSequence: String? = nil,
         history: [Chat] = [],
         seed: UInt32 = .random(in: .min ... .max),
@@ -72,10 +82,21 @@ open class LLM: ObservableObject {
 #if targetEnvironment(simulator)
         modelParams.n_gpu_layers = 0
 #endif
-        let model = llama_load_model_from_file(self.path, modelParams)!
+        var model: Model?
+        if (coreMLConfig == nil){
+            model = llama_load_model_from_file(self.path, modelParams)!
+            self.languageModel = nil
+        }
+        
         params = llama_context_default_params()
         let processorCount = UInt32(ProcessInfo().processorCount)
-        self.maxTokenCount = Int(min(maxTokenCount, llama_n_ctx_train(model)))
+        if (coreMLConfig != nil){
+            // won't modify this for CoreML
+            self.maxTokenCount = Int(maxTokenCount)
+        }else{
+            self.maxTokenCount = Int(min(maxTokenCount, llama_n_ctx_train(model)))
+        }
+        
         params.seed = seed
         params.n_ctx = UInt32(self.maxTokenCount)
         params.n_batch = params.n_ctx
@@ -85,13 +106,45 @@ open class LLM: ObservableObject {
         self.topP = topP
         self.temp = temp
         self.historyLimit = historyLimit
-        self.model = model
+        
+        if (coreMLConfig == nil){
+            self.model = model!
+        }
+        
         self.history = history
-        self.totalTokenCount = Int(llama_n_vocab(model))
-        self.newlineToken = model.newLineToken
+        // would need to handle the newline token portion here, can we pull that from somewhere?
+        // will hard-code for llama models for now
+        if (coreMLConfig != nil){
+            // we'll need to handle these for other model types, can we hard-code these for now?
+            self.newlineToken = 32000
+            self.totalTokenCount = 13
+        }else{
+            self.newlineToken = model!.newLineToken
+            self.totalTokenCount = Int(llama_n_vocab(model!))
+        }
+        
         self.stopSequence = stopSequence?.utf8CString
         self.stopSequenceLength = (self.stopSequence?.count ?? 1) - 1
         batch = llama_batch_init(Int32(self.maxTokenCount), 0, 1)
+        
+        // coreML setup way down here to get use of all self initialized parameters
+        if (coreMLConfig != nil){
+            self.languageModel = try! LanguageModel.loadCompiled(url: URL(fileURLWithPath: path), computeUnits: .cpuAndGPU)
+            self.model = nil
+            
+            // setup generation config for use with swift-transformers
+            // same one we were using before
+            let config = GenerationConfig(maxLength: 1024, maxNewTokens: 1024, topK: 50, topP: 0.9, repetitionPenalty: 1.1)
+            if let config = languageModel?.defaultGenerationConfig { self.generationConfig = config }
+        }
+        
+        // save the config
+        self.coreMLConfig = coreMLConfig
+        
+        // load the model the first time if it is not loaded
+        if (coreMLConfig == nil && context == nil){
+            context = .init(model!, params)
+        }
     }
     
     deinit {
@@ -101,6 +154,7 @@ open class LLM: ObservableObject {
     public convenience init(
         from url: URL,
         stopSequence: String? = nil,
+        coreMLConfig: MLModelConfiguration? = nil,
         history: [Chat] = [],
         seed: UInt32 = .random(in: .min ... .max),
         topK: Int32 = 40,
@@ -111,6 +165,7 @@ open class LLM: ObservableObject {
     ) {
         self.init(
             from: url.path,
+            coreMLConfig: coreMLConfig,
             stopSequence: stopSequence,
             history: history,
             seed: seed,
@@ -124,6 +179,7 @@ open class LLM: ObservableObject {
     
     public convenience init(
         from huggingFaceModel: HuggingFaceModel,
+        coreMLConfig: MLModelConfiguration? = nil,
         to url: URL = .documentsDirectory,
         as name: String? = nil,
         history: [Chat] = [],
@@ -140,6 +196,7 @@ open class LLM: ObservableObject {
         }
         self.init(
             from: url,
+            coreMLConfig: coreMLConfig,
             template: huggingFaceModel.template,
             history: history,
             seed: seed,
@@ -154,6 +211,7 @@ open class LLM: ObservableObject {
     
     public convenience init(
         from url: URL,
+        coreMLConfig: MLModelConfiguration? = nil,
         template: Template,
         history: [Chat] = [],
         seed: UInt32 = .random(in: .min ... .max),
@@ -165,6 +223,7 @@ open class LLM: ObservableObject {
     ) {
         self.init(
             from: url.path,
+            coreMLConfig: coreMLConfig,
             stopSequence: template.stopSequence,
             history: history,
             seed: seed,
@@ -178,6 +237,29 @@ open class LLM: ObservableObject {
         self.template = template
     }
     
+    // currently only works for non-CoreML models
+    public func clearModelFromMemory() {
+        context = nil
+        languageModel = nil
+    }
+    
+    private func llmConfigToGenerationConfig() -> GenerationConfig{
+        var config = GenerationConfig(maxNewTokens: self.maxTokenCount)
+        
+        // this will be set to 1, this way it generates 1 token at a time?
+        config.maxLength = 1
+        // note: some values are not converted
+        config.temperature = Double(self.temp)
+        config.topK = Int(self.topK)
+        config.topP = Double(self.topP)
+        
+        // we don't set these now, do we need to?
+        // config.padTokenId = 0
+        // config.bosTokenId = Token { llama_token_bos(self) }
+        // config.eosTokenId = Token { llama_token_eos(self) }
+        return config
+    }
+    
     private var shouldContinuePredicting = false
     public func stop() {
         shouldContinuePredicting = false
@@ -185,7 +267,7 @@ open class LLM: ObservableObject {
     
     @InferenceActor
     private func predictNextToken() async -> Token {
-        guard shouldContinuePredicting else { return model.endToken }
+        guard shouldContinuePredicting else { return model!.endToken }
         let logits = llama_get_logits_ith(context.pointer, batch.n_tokens - 1)!
         var candidates = (0..<totalTokenCount).map { token in
             llama_token_data(id: Int32(token), logit: logits[token], p: 0.0)
@@ -217,7 +299,6 @@ open class LLM: ObservableObject {
     
     private func prepare(from input: borrowing String, to output: borrowing AsyncStream<String>.Continuation) -> Bool {
         guard !input.isEmpty else { return false }
-        context = .init(model, params)
         var tokens = encode(input)
         var initialCount = tokens.count
         currentCount = Int32(initialCount)
@@ -266,7 +347,7 @@ open class LLM: ObservableObject {
             static var stopSequenceEndIndex = 0
             static var letters: [CChar] = []
         }
-        guard token != model.endToken else { return false }
+        guard token != model!.endToken else { return false }
         var word = decode(token)
         guard let stopSequence else { output.yield(word); return true }
         var found = 0 < saved.stopSequenceEndIndex
@@ -298,7 +379,9 @@ open class LLM: ObservableObject {
     
     private func getResponse(from input: String) -> AsyncStream<String> {
         .init { output in Task {
-            defer { context = nil }
+            // this used to force the model to be cleared after a response
+            // we want to keep the model in memory, and only release it when we want to
+            // defer { context = nil }
             guard prepare(from: input, to: output) else { return output.finish() }
             var response: [String] = []
             while currentCount < maxTokenCount {
@@ -333,15 +416,38 @@ open class LLM: ObservableObject {
         isAvailable = false
         self.input = input
         let processedInput = preprocess(input, history)
-        let response = getResponse(from: processedInput)
-        let output = await makeOutputFrom(response)
-        history += [(.user, input), (.bot, output)]
+        var output: String?
+        if (self.coreMLConfig == nil){
+            let response = getResponse(from: processedInput)
+            output = await makeOutputFrom(response)
+        }else{
+            output = try! await languageModel!.generate(config: self.generationConfig!, prompt: processedInput){currentGeneration in
+                self.update(self.tinyLlamaSanitize(input: currentGeneration))
+            }
+            
+            
+            // without this, the output is never set/to be used later on
+            self.output = tinyLlamaSanitize(input: output!).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        
+        history += [(.user, input), (.bot, output!)]
         let historyCount = history.count
         if historyLimit < historyCount {
             history.removeFirst(min(2, historyCount))
         }
-        postprocess(output)
+        postprocess(output!)
         isAvailable = true
+    }
+    
+    private func tinyLlamaSanitize(input: String) -> String {
+        // remove everything before AI repsonse, and everything after
+        // still has newline and some junk text after
+        let firstSplit = "assistant\n"
+        let lastSplit = "<|im_end"
+        
+        var sanitizedResponse = input.components(separatedBy: firstSplit).last?.components(separatedBy: lastSplit).first!
+        
+        return sanitizedResponse!
     }
     
     open func respond(to input: String) async {
@@ -360,16 +466,16 @@ open class LLM: ObservableObject {
 
     private var multibyteCharacter: [CUnsignedChar] = []
     private func decode(_ token: Token) -> String {
-        return model.decode(token, with: &multibyteCharacter)
+        return model!.decode(token, with: &multibyteCharacter)
     }
     
     public func decode(_ tokens: [Token]) -> String {
-        return tokens.map({model.decodeOnly($0)}).joined()
+        return tokens.map({model!.decodeOnly($0)}).joined()
     }
     
     @inlinable
     public func encode(_ text: borrowing String) -> [Token] {
-        model.encode(text)
+        model!.encode(text)
     }
 }
 
