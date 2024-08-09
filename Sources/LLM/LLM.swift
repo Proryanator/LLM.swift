@@ -789,6 +789,8 @@ extension URL {
                 let statusCode = (response as! HTTPURLResponse).statusCode
                 guard statusCode / 100 == 2 else { return continuation.resume(throwing: HuggingFaceError.network(statusCode: statusCode)) }
                 continuation.resume(returning: url)
+                // copy the file before iOS cleans it up (when the URL exits scope)
+                try! FileManager.default.moveItem(at: url, to: destination)
             }
             observation = task.progress.observe(\.fractionCompleted) { progress, _ in
                 updateProgress(progress.fractionCompleted)
@@ -796,7 +798,6 @@ extension URL {
             task.resume()
         }
         _ = observation
-        try FileManager.default.moveItem(at: url, to: destination)
     }
 }
 
