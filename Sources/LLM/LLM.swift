@@ -75,10 +75,22 @@ open class LLM: ObservableObject {
         topP: Float = 0.95,
         temp: Float = 0.8,
         historyLimit: Int = 8,
-        maxTokenCount: Int32 = 2048
+        maxTokenCount: Int32 = 2048,
+        cpuOnly: Bool = false
     ) {
         self.path = path.cString(using: .utf8)!
         var modelParams = llama_model_default_params()
+        
+        // modelParams.use_mlock = true
+        modelParams.use_mmap = false
+        
+        if (cpuOnly){
+            modelParams.n_gpu_layers = 0
+            // should these be on as well for GPU?
+            modelParams.use_mlock = true
+            modelParams.use_mmap = false
+        }
+        
 #if targetEnvironment(simulator)
         modelParams.n_gpu_layers = 0
 #endif
@@ -161,7 +173,8 @@ open class LLM: ObservableObject {
         topP: Float = 0.95,
         temp: Float = 0.8,
         historyLimit: Int = 8,
-        maxTokenCount: Int32 = 2048
+        maxTokenCount: Int32 = 2048,
+        cpuOnly: Bool = false
     ) {
         self.init(
             from: url.path,
@@ -173,7 +186,8 @@ open class LLM: ObservableObject {
             topP: topP,
             temp: temp,
             historyLimit: historyLimit,
-            maxTokenCount: maxTokenCount
+            maxTokenCount: maxTokenCount,
+            cpuOnly: cpuOnly
         )
     } 
     
@@ -189,6 +203,7 @@ open class LLM: ObservableObject {
         temp: Float = 0.8,
         historyLimit: Int = 8,
         maxTokenCount: Int32 = 2048,
+        cpuOnly: Bool = false,
         updateProgress: @escaping (Double) -> Void = { print(String(format: "downloaded(%.2f%%)", $0 * 100)) }
     ) async throws {
         let url = try await huggingFaceModel.download(to: url, as: name) { progress in
@@ -204,7 +219,8 @@ open class LLM: ObservableObject {
             topP: topP,
             temp: temp,
             historyLimit: historyLimit,
-            maxTokenCount: maxTokenCount
+            maxTokenCount: maxTokenCount,
+            cpuOnly: cpuOnly
         )
         self.updateProgress = updateProgress
     }
@@ -219,7 +235,8 @@ open class LLM: ObservableObject {
         topP: Float = 0.95,
         temp: Float = 0.8,
         historyLimit: Int = 8,
-        maxTokenCount: Int32 = 2048
+        maxTokenCount: Int32 = 2048,
+        cpuOnly: Bool = false
     ) {
         self.init(
             from: url.path,
@@ -231,7 +248,8 @@ open class LLM: ObservableObject {
             topP: topP,
             temp: temp,
             historyLimit: historyLimit,
-            maxTokenCount: maxTokenCount
+            maxTokenCount: maxTokenCount,
+            cpuOnly: cpuOnly
         )
         self.preprocess = template.preprocess
         self.template = template
