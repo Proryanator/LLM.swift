@@ -14,9 +14,6 @@ public typealias Chat = (role: Role, content: String)
 }
 
 open class LLM: ObservableObject {
-    // set to fully skip loading the model
-    nonisolated(unsafe) public static var isUnitTest: Bool = false
-    
     // model used for non-coreML models
     public var model: Model?
     // this is calculated/generated if you are using CoreML
@@ -98,22 +95,18 @@ open class LLM: ObservableObject {
         modelParams.n_gpu_layers = 0
 #endif
         var model: Model?
-        if (coreMLConfig == nil && !LLM.isUnitTest){
+        if (coreMLConfig == nil){
             model = llama_load_model_from_file(self.path, modelParams)!
             self.languageModel = nil
         }
         
         params = llama_context_default_params()
         let processorCount = UInt32(ProcessInfo().processorCount)
-        if (!LLM.isUnitTest) {
-            if (coreMLConfig != nil){
-                // won't modify this for CoreML
-                self.maxTokenCount = Int(maxTokenCount)
-            }else{
-                self.maxTokenCount = Int(min(maxTokenCount, llama_n_ctx_train(model)))
-            }
+        if (coreMLConfig != nil){
+            // won't modify this for CoreML
+            self.maxTokenCount = Int(maxTokenCount)
         }else{
-            self.maxTokenCount = 10
+            self.maxTokenCount = Int(min(maxTokenCount, llama_n_ctx_train(model)))
         }
         
         params.seed = seed
@@ -126,7 +119,7 @@ open class LLM: ObservableObject {
         self.temp = temp
         self.historyLimit = historyLimit
         
-        if (coreMLConfig == nil && !LLM.isUnitTest){
+        if (coreMLConfig == nil){
             self.model = model!
         }
         
@@ -138,13 +131,8 @@ open class LLM: ObservableObject {
             self.newlineToken = 32000
             self.totalTokenCount = 13
         }else{
-            if (!LLM.isUnitTest) {
-                self.newlineToken = model!.newLineToken
-                self.totalTokenCount = Int(llama_n_vocab(model!))
-            }else{
-                self.newlineToken = 1
-                self.totalTokenCount = 1
-            }
+            self.newlineToken = model!.newLineToken
+            self.totalTokenCount = Int(llama_n_vocab(model!))
         }
         
         self.stopSequence = stopSequence?.utf8CString
@@ -152,7 +140,7 @@ open class LLM: ObservableObject {
         batch = llama_batch_init(Int32(self.maxTokenCount), 0, 1)
         
         // coreML setup way down here to get use of all self initialized parameters
-        if (coreMLConfig != nil && !LLM.isUnitTest){
+        if (coreMLConfig != nil){
             self.languageModel = try! LanguageModel.loadCompiled(url: URL(fileURLWithPath: path), computeUnits: .cpuAndGPU)
             self.model = nil
             
@@ -166,7 +154,7 @@ open class LLM: ObservableObject {
         self.coreMLConfig = coreMLConfig
         
         // load the model the first time if it is not loaded
-        if (coreMLConfig == nil && context == nil && !LLM.isUnitTest){
+        if (coreMLConfig == nil && context == nil){
             context = .init(model!, params)
         }
     }
@@ -218,21 +206,13 @@ open class LLM: ObservableObject {
         cpuOnly: Bool = false,
         updateProgress: @escaping (Double) -> Void = { print(String(format: "downloaded(%.2f%%)", $0 * 100)) }
     ) async throws {
-        var retrievedURL: URL?
-        var template: Template = .chatML()
-        
-        if (!LLM.isUnitTest) {
-            retrievedURL = try await huggingFaceModel.download(to: url, as: name) { progress in
-                Task { await MainActor.run { updateProgress(progress) } }
-            }
-            
-            template = huggingFaceModel.template
+        let url = try await huggingFaceModel.download(to: url, as: name) { progress in
+            Task { await MainActor.run { updateProgress(progress) } }
         }
-        
         self.init(
             from: url,
             coreMLConfig: coreMLConfig,
-            template: template,
+            template: huggingFaceModel.template,
             history: history,
             seed: seed,
             topK: topK,
