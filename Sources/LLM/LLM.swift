@@ -259,6 +259,9 @@ open class LLM: ObservableObject {
     public func clearModelFromMemory() {
         context = nil
         languageModel = nil
+        
+        // for some reason, need to call this free function directly to fully release the model
+        llama_free_model(model)
     }
     
     private func llmConfigToGenerationConfig() -> GenerationConfig{
