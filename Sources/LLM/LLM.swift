@@ -219,9 +219,10 @@ open class LLM: ObservableObject {
     
     private func prepare(from input: borrowing String, to output: borrowing AsyncStream<String>.Continuation) -> Bool {
         guard !input.isEmpty else { return false }
-        if (context == nil) {
-            context = .init(model, params)
-        }
+        // TODO: what is the behavior for doing it this way?
+        context = .init(model, params)
+        /*if (context == nil) {
+        }*/
         var tokens = encode(input)
         var initialCount = tokens.count
         currentCount = Int32(initialCount)
