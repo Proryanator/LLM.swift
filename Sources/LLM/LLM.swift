@@ -216,7 +216,9 @@ open class LLM: ObservableObject {
     
     private func prepare(from input: borrowing String, to output: borrowing AsyncStream<String>.Continuation) -> Bool {
         guard !input.isEmpty else { return false }
-        context = .init(model, params)
+        if (context == nil) {
+            context = .init(model, params)
+        }
         var tokens = encode(input)
         var initialCount = tokens.count
         currentCount = Int32(initialCount)
@@ -297,7 +299,8 @@ open class LLM: ObservableObject {
     
     private func getResponse(from input: String) -> AsyncStream<String> {
         .init { output in Task {
-            defer { context = nil }
+            // keeps the model in memory after each response
+            // defer { context = nil }
             guard prepare(from: input, to: output) else { return output.finish() }
             var response: [String] = []
             while currentCount < maxTokenCount {
@@ -682,6 +685,8 @@ extension URL {
                 let statusCode = (response as! HTTPURLResponse).statusCode
                 guard statusCode / 100 == 2 else { return continuation.resume(throwing: HuggingFaceError.network(statusCode: statusCode)) }
                 continuation.resume(returning: url)
+                // copy the file before iOS cleans it up (when the URL exits scope)
+                try! FileManager.default.moveItem(at: url, to: destination)
             }
             observation = task.progress.observe(\.fractionCompleted) { progress, _ in
                 updateProgress(progress.fractionCompleted)
@@ -689,7 +694,6 @@ extension URL {
             task.resume()
         }
         _ = observation
-        try FileManager.default.moveItem(at: url, to: destination)
     }
 }
 
