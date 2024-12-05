@@ -306,19 +306,7 @@ open class LLM: ObservableObject {
         return !contextCache.isEmpty
     }
     
-    // intended to be called after you delete the history
-    public func resetContext() {
-        // TODO: this does not work if you re-open a chat; should disable the ability to delete messages
-        // if you do not have context
-        if (!contextCache.isEmpty) {
-            context = contextCache.removeLast()
-        }
-        
-        // modify the seed; makes sure the next generated text is different
-        rotateSeed()
-    }
-    
-    private func rotateSeed() {
+    public func rotateSeed() {
         var newSeed = seed
         while (newSeed == seed) {
             newSeed = .random(in: .min ... .max)
