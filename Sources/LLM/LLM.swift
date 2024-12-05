@@ -70,6 +70,9 @@ open class LLM: ObservableObject {
     ) {
         self.path = path.cString(using: .utf8)!
         var modelParams = llama_model_default_params()
+        // locks model into memory for higher performance
+        modelParams.use_mmap = false
+        
 #if targetEnvironment(simulator)
         modelParams.n_gpu_layers = 0
 #endif
