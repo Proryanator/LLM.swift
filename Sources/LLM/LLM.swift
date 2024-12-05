@@ -47,9 +47,6 @@ open class LLM: ObservableObject {
     }
     
     private var context: Context!
-    // TODO: used to cache the context between each generation, allowing
-    // for restoring to previous context before a sentence
-    private var contextCache: [Context] = []
     private var batch: llama_batch!
     private let maxTokenCount: Int
     private let totalTokenCount: Int
@@ -221,8 +218,6 @@ open class LLM: ObservableObject {
         guard !input.isEmpty else { return false }
         // keeping the init here helps with subsequent regens
         context = .init(model, params)
-        // cache the current context before starting
-        contextCache.append(context)
 
         var tokens = encode(input)
         var initialCount = tokens.count
@@ -300,10 +295,6 @@ open class LLM: ObservableObject {
         }
         if !letters.isEmpty { output.yield(found ? String(cString: letters + [0]) : word) }
         return true
-    }
-    
-    public func hasPastContext() -> Bool {
-        return !contextCache.isEmpty
     }
     
     public func rotateSeed() {
