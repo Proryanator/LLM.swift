@@ -47,6 +47,9 @@ open class LLM: ObservableObject {
     }
     
     private var context: Context!
+    // TODO: used to cache the context between each generation, allowing
+    // for restoring to previous context before a sentence
+    private var contextCache: Context!
     private var batch: llama_batch!
     private let maxTokenCount: Int
     private let totalTokenCount: Int
@@ -297,10 +300,30 @@ open class LLM: ObservableObject {
         return true
     }
     
+    // intended to be called after you delete the history
+    public func resetContext() {
+        context = contextCache
+        
+        // modify the seed; makes sure the next generated text is different
+        rotateSeed()
+    }
+    
+    private func rotateSeed() {
+        var newSeed = seed
+        while (newSeed == seed) {
+            newSeed = .random(in: .min ... .max)
+        }
+        
+        seed = newSeed
+    }
+    
     private func getResponse(from input: String) -> AsyncStream<String> {
         .init { output in Task {
             // keeps the model in memory after each response
             // defer { context = nil }
+            
+            // cache the current context before starting
+            contextCache = context
             guard prepare(from: input, to: output) else { return output.finish() }
             var response: [String] = []
             while currentCount < maxTokenCount {
