@@ -359,7 +359,8 @@ open class LLM: ObservableObject {
         self.input = input
         let processedInput = preprocess(input, history)
         let response = getResponse(from: processedInput)
-        let output = await makeOutputFrom(response)
+        var output = await makeOutputFrom(response)
+        output = tinyLlamaSanitize(input: output)
         history += [(.user, input), (.bot, output)]
         let historyCount = history.count
         if historyLimit < historyCount {
@@ -368,6 +369,17 @@ open class LLM: ObservableObject {
         postprocess(output)
         isAvailable = true
     }
+    
+    private func tinyLlamaSanitize(input: String) -> String {
+            // remove everything before AI repsonse, and everything after
+            // still has newline and some junk text after
+            let firstSplit = "assistant\n"
+            let lastSplit = "<|im_end"
+
+            var sanitizedResponse = input.components(separatedBy: firstSplit).last?.components(separatedBy: lastSplit).first!
+
+            return sanitizedResponse!
+        }
     
     open func respond(to input: String) async {
         await respond(to: input) { [self] response in
