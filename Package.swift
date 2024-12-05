@@ -6,8 +6,8 @@ import PackageDescription
 let package = Package(
     name: "LLM",
     platforms: [
-        .macOS(.v13),
-        .iOS(.v16),
+        .macOS(.v12),
+        .iOS(.v14),
         .visionOS(.v1),
         .watchOS(.v4),
         .tvOS(.v14)
@@ -18,17 +18,14 @@ let package = Package(
             targets: ["LLM"]),
     ],
     dependencies: [
-        // binning to a specific version to prevent unexpected breakage; will upgrade if necessary
-        .package(url: "https://github.com/ggerganov/llama.cpp/", branch: "b3334"),
+        .package(url: "https://github.com/ggerganov/llama.cpp/", branch: "b4266"),
         .package(url: "https://github.com/kishikawakatsumi/swift-power-assert", from: "0.12.0"),
-        .package(url: "https://github.com/huggingface/swift-transformers", from: "0.1.9")
     ],
     targets: [
         .target(
             name: "LLM",
             dependencies: [
-                .product(name: "llama", package: "llama.cpp"),
-                .product(name: "Transformers", package: "swift-transformers")
+                .product(name: "llama", package: "llama.cpp")
             ]),
         .testTarget(
             name: "LLMTests",
