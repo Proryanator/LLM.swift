@@ -49,7 +49,7 @@ open class LLM: ObservableObject {
     private var context: Context!
     // TODO: used to cache the context between each generation, allowing
     // for restoring to previous context before a sentence
-    private var contextCache: Context!
+    private var contextCache: [Context] = []
     private var batch: llama_batch!
     private let maxTokenCount: Int
     private let totalTokenCount: Int
@@ -219,10 +219,11 @@ open class LLM: ObservableObject {
     
     private func prepare(from input: borrowing String, to output: borrowing AsyncStream<String>.Continuation) -> Bool {
         guard !input.isEmpty else { return false }
-        // TODO: what is the behavior for doing it this way?
+        // keeping the init here helps with subsequent regens
         context = .init(model, params)
-        /*if (context == nil) {
-        }*/
+        // cache the current context before starting
+        contextCache.append(context)
+
         var tokens = encode(input)
         var initialCount = tokens.count
         currentCount = Int32(initialCount)
@@ -301,9 +302,17 @@ open class LLM: ObservableObject {
         return true
     }
     
+    public func hasPastContext() -> Bool {
+        return !contextCache.isEmpty
+    }
+    
     // intended to be called after you delete the history
     public func resetContext() {
-        context = contextCache
+        // TODO: this does not work if you re-open a chat; should disable the ability to delete messages
+        // if you do not have context
+        if (!contextCache.isEmpty) {
+            context = contextCache.removeLast()
+        }
         
         // modify the seed; makes sure the next generated text is different
         rotateSeed()
@@ -321,10 +330,8 @@ open class LLM: ObservableObject {
     private func getResponse(from input: String) -> AsyncStream<String> {
         .init { output in Task {
             // keeps the model in memory after each response
-            // defer { context = nil }
+            defer { context = nil }
             
-            // cache the current context before starting
-            contextCache = context
             guard prepare(from: input, to: output) else { return output.finish() }
             var response: [String] = []
             while currentCount < maxTokenCount {
