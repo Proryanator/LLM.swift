@@ -96,6 +96,9 @@ open class LLM: ObservableObject {
         self.stopSequence = stopSequence?.utf8CString
         self.stopSequenceLength = (self.stopSequence?.count ?? 1) - 1
         batch = llama_batch_init(Int32(self.maxTokenCount), 0, 1)
+        
+        // init the context model
+        initContext()
     }
     
     deinit {
@@ -214,10 +217,17 @@ open class LLM: ObservableObject {
         output.yield("tl;dr")
     }
     
+    // meant to be called right after loading the model into memory
+    func initContext() {
+        context = .init(model, params)
+    }
+    
     private func prepare(from input: borrowing String, to output: borrowing AsyncStream<String>.Continuation) -> Bool {
         guard !input.isEmpty else { return false }
         // keeping the init here helps with subsequent regens
-        context = .init(model, params)
+        if (context == nil) {
+            context = .init(model, params)
+        }
 
         var tokens = encode(input)
         var initialCount = tokens.count
@@ -306,10 +316,20 @@ open class LLM: ObservableObject {
         seed = newSeed
     }
     
+    // to be called for the following instances:
+    // re-generating messages
+    // editing a previous message
+    // deleting a previous message
+    public func clearContext() {
+        context = nil
+    }
+    
     private func getResponse(from input: String) -> AsyncStream<String> {
         .init { output in Task {
-            // keeps the model in memory after each response
-            defer { context = nil }
+            // doing this automatically will cause constant memory load
+            /*defer {
+                context = nil
+            }*/
             
             guard prepare(from: input, to: output) else { return output.finish() }
             var response: [String] = []
