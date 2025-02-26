@@ -103,6 +103,8 @@ open class LLM: ObservableObject {
     
     deinit {
         llama_free_model(model)
+        // TODO: this should clear up all of the batch data but does not appear to do so
+        llama_batch_free(self.batch)
     }
     
     public convenience init(
