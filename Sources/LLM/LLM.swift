@@ -193,7 +193,7 @@ open class LLM: ObservableObject {
     }
     
     @InferenceActor
-    private func predictNextToken() async -> Token {
+    private func predictNextToken() async throws -> Token {
         guard shouldContinuePredicting else { return model.endToken }
         let samplerParams = llama_sampler_chain_default_params()
         let sampler = llama_sampler_chain_init(samplerParams)
@@ -208,7 +208,7 @@ open class LLM: ObservableObject {
         
         batch.clear()
         batch.add(token, currentCount, [0], true)
-        context.decode(batch)
+        try context.decode(batch)
         return token
     }
     
@@ -224,7 +224,7 @@ open class LLM: ObservableObject {
         context = .init(model, params)
     }
     
-    private func prepare(from input: borrowing String, to output: borrowing AsyncStream<String>.Continuation) -> Bool {
+    private func prepare(from input: borrowing String, to output: borrowing AsyncStream<String>.Continuation) throws -> Bool {
         guard !input.isEmpty else { return false }
         // keeping the init here helps with subsequent regens
         if (context == nil) {
@@ -251,7 +251,7 @@ open class LLM: ObservableObject {
             batch.n_tokens = Int32(i)
             batch.add(token, batch.n_tokens, [0], i == initialCount - 1)
         }
-        context.decode(batch)
+        try context.decode(batch)
         shouldContinuePredicting = true
         return true
     }
@@ -333,11 +333,24 @@ open class LLM: ObservableObject {
                 context = nil
             }*/
             
-            guard prepare(from: input, to: output) else { return output.finish() }
+            do{
+                guard try prepare(from: input, to: output) else { return output.finish() }
+            }catch{
+                // force the generation to stop; may not be able to catch any errors on the user-side with this
+                return output.finish()
+            }
+            
             var response: [String] = []
             while currentCount < maxTokenCount {
-                let token = await predictNextToken()
-                if !process(token, to: output) { return output.finish() }
+                var token: Token?
+                do{
+                    token = await try predictNextToken()
+                }catch{
+                    // is there any way we can signal that there was an issue?
+                    return output.finish()
+                }
+                
+                if !process(token!, to: output) { return output.finish() }
                 currentCount += 1
             }
             await finishResponse(from: &response, to: output)
@@ -469,6 +482,7 @@ extension Model {
 }
 
 private class Context {
+    static var errorCounter = 0
     let pointer: OpaquePointer
     init(_ model: Model, _ params: llama_context_params) {
         self.pointer = llama_new_context_with_model(model, params)
@@ -476,8 +490,14 @@ private class Context {
     deinit {
         llama_free(pointer)
     }
-    func decode(_ batch: llama_batch) {
-        guard llama_decode(pointer, batch) == 0 else { fatalError("llama_decode failed") }
+    func decode(_ batch: llama_batch) throws {
+        // to simulate a failure mid-way
+        /*Context.errorCounter+=1
+        if (Context.errorCounter >= 10) {
+            throw LLMDecodingError()
+        }*/
+        
+        guard llama_decode(pointer, batch) == 0 else { throw LLMDecodingError() }
     }
 }
 
@@ -516,6 +536,10 @@ extension Token {
         case couldBeEnd
         case normal
     }
+}
+
+public struct LLMDecodingError: Error {
+    
 }
 
 public enum Role {
