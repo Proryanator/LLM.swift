@@ -198,17 +198,56 @@ open class LLM: ObservableObject {
         let samplerParams = llama_sampler_chain_default_params()
         let sampler = llama_sampler_chain_init(samplerParams)
         
-        llama_sampler_chain_add(sampler, llama_sampler_init_top_k(topK))
-        llama_sampler_chain_add(sampler, llama_sampler_init_top_p(topP, 1))
-        llama_sampler_chain_add(sampler, llama_sampler_init_temp(temp))
-        llama_sampler_chain_add(sampler, llama_sampler_init_dist(seed))
+        // adding 4 samplers, we can remove those 4 samplers after we are done?
+        let top_k_sampler = llama_sampler_init_top_k(topK)
+        let top_p_sampler = llama_sampler_init_top_p(topP, 1)
+        let temp_sampler = llama_sampler_init_temp(temp)
+        let dist_sampler = llama_sampler_init_dist(seed)
+        
+        llama_sampler_chain_add(sampler, top_k_sampler)
+        llama_sampler_chain_add(sampler, top_p_sampler)
+        // 32 bytes are being leaked for whatever is the 3rd entry here; swapped this to be the top_p_sampler and
+        // it was being flagged as leaking memory
+        llama_sampler_chain_add(sampler, temp_sampler)
+        llama_sampler_chain_add(sampler, dist_sampler)
 
         let i = batch.n_tokens - 1
         let token = llama_sampler_sample(sampler, context.pointer, i)
         
         batch.clear()
+        // TODO: do we also need to clear this as well?
         batch.add(token, currentCount, [0], true)
         try context.decode(batch)
+        
+        // accessing the static free functions on these samplers to free up memory
+        top_k_sampler?.pointee.iface.pointee.free(top_k_sampler)
+        top_p_sampler?.pointee.iface.pointee.free(top_p_sampler)
+        // this deletes the .ctx for temp, so all that is left is some data in .iface?
+        temp_sampler?.pointee.iface.pointee.free(temp_sampler)
+        dist_sampler?.pointee.iface.pointee.free(dist_sampler)
+        
+        // possible datapoints being left behind
+//        /* .name   = */ llama_sampler_temp_name,
+//        /* .accept = */ nullptr,
+//        /* .apply  = */ llama_sampler_temp_apply,
+//        /* .reset  = */ nullptr,
+//        /* .clone  = */ llama_sampler_temp_clone,
+//        /* .free   = */ llama_sampler_temp_free,
+        
+        top_k_sampler?.deallocate()
+        top_p_sampler?.deallocate()
+        temp_sampler?.deallocate()
+        dist_sampler?.deallocate()
+        
+        // clear out the samplers added
+        for i in (0...llama_sampler_chain_n(sampler)).reversed() {
+            llama_sampler_chain_remove(sampler, i)
+        }
+        
+        // clear out remaining data in the sampler object
+        sampler?.pointee.ctx.deallocate()
+        sampler?.deallocate()
+        
         return token
     }
     
@@ -345,6 +384,8 @@ open class LLM: ObservableObject {
                 var token: Token?
                 do{
                     token = await try predictNextToken()
+                    // short-circuit to minimize the memory leak
+                    // throw LLMDecodingError()
                 }catch{
                     // is there any way we can signal that there was an issue?
                     return output.finish()
