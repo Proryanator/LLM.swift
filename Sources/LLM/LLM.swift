@@ -733,13 +733,31 @@ public struct HuggingFaceModel {
     }
     
     package func getDownloadURLStrings() async throws -> [String] {
-        let url = URL(string: "https://huggingface.co/\(name)/tree/main")!
-        let data = try await url.getData()
-        let content = String(data: data, encoding: .utf8)!
-        let downloadURLPattern = #"(?<=href=").*\.gguf\?download=true"#
-        let matches = try! downloadURLPattern.matches(in: content)
-        let root = "https://huggingface.co"
-        return matches.map { match in root + match }
+        let apiURL = "https://huggingface.co/api/models/\(name)"
+            
+            guard let url = URL(string: apiURL) else {
+                throw URLError(.badURL)
+            }
+            
+            let (data, _) = try await URLSession.shared.data(from: url)
+            
+            struct HFResponse: Decodable {
+                struct Sibling: Decodable {
+                    let rfilename: String
+                }
+                let siblings: [Sibling]
+            }
+            
+            let decoded = try JSONDecoder().decode(HFResponse.self, from: data)
+            
+            let base = "https://huggingface.co/\(name)/resolve/main/"
+            
+            let ggufFiles = decoded.siblings
+                .map { $0.rfilename }
+                .filter { $0.hasSuffix(".gguf") }
+                .map { base + $0 + "?download=true" }
+            
+            return ggufFiles
     }
 
     package func getDownloadURL() async throws -> URL? {
